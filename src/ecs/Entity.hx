@@ -168,21 +168,30 @@ abstract Entity(Int) from Int to Int {
 			Context.error('Required one or more Components', pos);
 		}
 
-		var addComponentsToContainersExprs = components.map(function(c) {
-			var info = getComponentContainerInfo(c, pos);
-
-			return info.getAddExpr(macro __entity__, c);
-			// var containerName = (c.typeof().follow().toComplexType()).getComponentContainerInfo().fullName;
-			// return macro @:privateAccess $i{ containerName }.inst().add(__entity__, $c);
+		var complexTypes = components.map(function(c) {
+			var to = c.typeof();
+			if (!to.isSuccess()) {
+				Context.error('Can not find type for ${c}', pos);
+			}
+			return c.typeof().sure().follow().toComplexType();
 		});
 
-		var body = [].concat(addComponentsToContainersExprs).concat([
-			macro if (__entity__.isActive()) {
-				for (v in ecs.Workflow.views) {
-					@:privateAccess v.addIfMatched(__entity__);
-				}
-			}
-		]).concat([macro return __entity__]);
+		var addComponentsToContainersExprs = [for(i => c in components) {
+			var info = complexTypes[i].getComponentContainerInfo(pos);
+			info.getAddExpr(macro __entity__, c);
+		}];
+
+		var addEntityToRelatedViewsExprs = complexTypes.map(function(ct) {
+			var viewName = ct.getViewsOfComponent(pos).followName(pos);
+			var view = viewName.asTypeIdent(Context.currentPos());
+			return macro @:privateAccess $view.inst().addIfMatched(__entity__);
+		});
+
+		var body = macro {
+			$b{ addComponentsToContainersExprs };
+			if (__entity__.isActive()) $b{ addEntityToRelatedViewsExprs };
+			return __entity__;
+		};
 
 		var ret = macro #if (haxe_ver >= 4) inline #end (function(__entity__:ecs.Entity) $b{body})($self);
 
